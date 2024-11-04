@@ -38,6 +38,7 @@ class EspeakDriver(object):
         self._stopping = False
         self._speaking = False
         self._text_to_say = None
+        self._queue = []  #
         self._data_buffer = b""
         self._numerise_buffer = []
         self._save_file = None
@@ -59,9 +60,14 @@ class EspeakDriver(object):
         _espeak.SetSynthCallback(None)
 
     def stop(self):
-        if _espeak.IsPlaying():
-            self._stopping = True
-            _espeak.Cancel()
+        if not self._stopping:
+            print("[DEBUG] EspeakDriver.stop called")
+            if self._looping:
+                self._stopping = True
+                self._looping = False
+                if _espeak.IsPlaying():
+                    _espeak.Cancel()
+                self._proxy.setBusy(False)
 
     @staticmethod
     def getProperty(name: str):
@@ -134,10 +140,10 @@ class EspeakDriver(object):
         self._proxy.setBusy(True)
         self._proxy.notify("started-utterance")
         self._speaking = True
-        self._data_buffer = b""  # Ensure buffer is cleared before starting
+        self._data_buffer = b""
         try:
             _espeak.Synth(
-                str(text).encode("utf-8"), flags=_espeak.ENDPAUSE | _espeak.CHARS_UTF8
+                text.encode("utf-8"), flags=_espeak.ENDPAUSE | _espeak.CHARS_UTF8
             )
         except Exception as e:
             self._proxy.setBusy(False)
@@ -148,13 +154,15 @@ class EspeakDriver(object):
         if not self._speaking:
             return 0
 
-        # Process each event in the current callback
         i = 0
         while True:
             event = events[i]
+
             if event.type == _espeak.EVENT_LIST_TERMINATED:
                 break
+
             elif event.type == _espeak.EVENT_WORD:
+                # Handle word events to notify on each word spoken
                 if self._text_to_say:
                     start_index = event.text_position - 1
                     end_index = start_index + event.length
@@ -169,50 +177,53 @@ class EspeakDriver(object):
                 )
 
             elif event.type == _espeak.EVENT_MSG_TERMINATED:
-                # Final event indicating synthesis completion
+                # Handle utterance completion
                 if self._save_file:
+                    # Save audio to file if requested
                     try:
                         with wave.open(self._save_file, "wb") as f:
-                            f.setnchannels(1)  # Mono
-                            f.setsampwidth(2)  # 16-bit samples
-                            f.setframerate(22050)  # 22,050 Hz sample rate
+                            f.setnchannels(1)
+                            f.setsampwidth(2)
+                            f.setframerate(22050)
                             f.writeframes(self._data_buffer)
                         print(f"Audio saved to {self._save_file}")
                     except Exception as e:
                         raise RuntimeError(f"Error saving WAV file: {e}")
                 else:
+                    # Playback temporary file (if not saving to file)
                     try:
                         with NamedTemporaryFile(
                             suffix=".wav", delete=False
                         ) as temp_wav:
                             with wave.open(temp_wav, "wb") as f:
-                                f.setnchannels(1)  # Mono
-                                f.setsampwidth(2)  # 16-bit samples
-                                f.setframerate(22050)  # 22,050 Hz sample rate
+                                f.setnchannels(1)
+                                f.setsampwidth(2)
+                                f.setframerate(22050)
                                 f.writeframes(self._data_buffer)
 
                             temp_wav_name = temp_wav.name
                             temp_wav.flush()
 
-                        # Playback functionality (for say method)
-                        if platform.system() == "Darwin":  # macOS
+                        if platform.system() == "Darwin":
                             subprocess.run(["afplay", temp_wav_name], check=True)
                         elif platform.system() == "Linux":
                             os.system(f"aplay {temp_wav_name} -q")
                         elif platform.system() == "Windows":
                             winsound.PlaySound(temp_wav_name, winsound.SND_FILENAME)
 
-                        # Remove the file after playback
                         os.remove(temp_wav_name)
                     except Exception as e:
                         print(f"Playback error: {e}")
 
-                # Clear the buffer and mark as finished
-                self._data_buffer = b""
+                print(
+                    "[DEBUG] Utterance complete; resetting text_to_say and speaking flag."
+                )
+                self._text_to_say = None  # Clear text once utterance completes
                 self._speaking = False
                 self._proxy.notify("finished-utterance", completed=True)
                 self._proxy.setBusy(False)
-                self.endLoop()
+                if not self._is_external_loop:
+                    self.endLoop()
                 break
 
             i += 1
@@ -226,31 +237,57 @@ class EspeakDriver(object):
         return 0
 
     def endLoop(self):
-        self._looping = False
+        """End the loop only when there’s no more text to say."""
+        if self._queue or self._text_to_say:
+            print(
+                "EndLoop called, but queue or text_to_say is not empty; continuing..."
+            )
+            return  # Keep looping if there’s still text
+        else:
+            print("EndLoop called; stopping loop.")
+            self._looping = False
+            self._proxy.setBusy(False)
 
-    def startLoop(self):
-        first = True
+    def startLoop(self, external=False):
+        """Start the synthesis loop."""
+        print("Starting loop")
         self._looping = True
+        self._is_external_loop = external
+
         while self._looping:
-            if not self._looping:
+            if not self._speaking and self._queue:
+                self._text_to_say = self._queue.pop(0)
+                print(f"Synthesizing text: {self._text_to_say}")
+                self._start_synthesis(self._text_to_say)
+
+            try:
+                if not external:
+                    next(self.iterate())
+                time.sleep(0.01)
+            except StopIteration:
                 break
-            if first:
-                self._proxy.setBusy(False)
-                first = False
-                if self._text_to_say:
-                    self._start_synthesis(self._text_to_say)
-            self.iterate()
-            time.sleep(0.01)
+        self._proxy.setBusy(False)
 
     def iterate(self):
+        """Process events within an external loop context."""
         if not self._looping:
             return
+
         if self._stopping:
+            # Cancel the current utterance if stopping
             _espeak.Cancel()
             self._stopping = False
             self._proxy.notify("finished-utterance", completed=False)
             self._proxy.setBusy(False)
-            self.endLoop()
+            self.endLoop()  # Set `_looping` to False, signaling exit
+
+        # Yield only if in an external loop to hand control back
+        if self._is_external_loop:
+            yield
 
     def say(self, text):
-        self._text_to_say = text
+        print(f"[DEBUG] EspeakDriver.say called with text: {text}")
+        self._queue.append(text)  # Add text to the local queue
+        if not self._looping:
+            print("[DEBUG] Starting loop from say")
+            self.startLoop()
