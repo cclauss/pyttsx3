@@ -213,6 +213,8 @@ def Synth(
     flags=0,
     user_data=None,
 ):
+    if isinstance(text, str):
+        text = text.encode("utf-8")
     return cSynth(
         text,
         len(text) * 10,

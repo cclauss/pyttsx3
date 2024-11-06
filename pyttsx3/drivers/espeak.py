@@ -2,7 +2,8 @@ import os
 import wave
 import platform
 import ctypes
-import time
+
+# import time
 import subprocess
 from tempfile import NamedTemporaryFile
 
@@ -24,6 +25,7 @@ class EspeakDriver(object):
     _defaultVoice = ""
 
     def __init__(self, proxy):
+        print(f"espeak.py - EspeakDriver.__init__(proxy = {proxy})")
         if not EspeakDriver._moduleInitialized:
             # espeak cannot initialize more than once per process and has
             # issues when terminating from python (assert error on close)
@@ -131,14 +133,13 @@ class EspeakDriver(object):
         self._text_to_say = text
 
     def _start_synthesis(self, text):
+        print(f"espeak.py - EspeakDriver._start_synthesis({text = })")
         self._proxy.setBusy(True)
         self._proxy.notify("started-utterance")
         self._speaking = True
         self._data_buffer = b""  # Ensure buffer is cleared before starting
         try:
-            _espeak.Synth(
-                str(text).encode("utf-8"), flags=_espeak.ENDPAUSE | _espeak.CHARS_UTF8
-            )
+            _espeak.Synth(text, flags=_espeak.ENDPAUSE | _espeak.CHARS_UTF8)
         except Exception as e:
             self._proxy.setBusy(False)
             self._proxy.notify("error", exception=e)
@@ -229,18 +230,17 @@ class EspeakDriver(object):
         self._looping = False
 
     def startLoop(self):
-        first = True
-        self._looping = True
-        while self._looping:
-            if not self._looping:
-                break
-            if first:
-                self._proxy.setBusy(False)
-                first = False
-                if self._text_to_say:
-                    self._start_synthesis(self._text_to_say)
-            self.iterate()
-            time.sleep(0.01)
+        print(f"espeak.py - EspeakDriver.startLoop() - {dir(self._proxy) = }")
+        print(f"espeak.py - EspeakDriver.startLoop() - {self._proxy._queue = }")
+        while self._proxy._queue:
+            print(f"espeak.py - EspeakDriver.startLoop() - TOP {self._proxy._queue = }")
+            _mtd, args, _name = self._proxy._queue.pop(0)
+            if args:
+                self._start_synthesis(args[0])
+                self.iterate()
+            print(
+                f"espeak.py - EspeakDriver.startLoop() - BOTTOM {self._proxy._queue = }"
+            )
 
     def iterate(self):
         if not self._looping:

@@ -53,6 +53,7 @@ def test_multiple_utterances(driver_name):
     engine.runAndWait()
     print(f"{engine.proxy._queue = }")
     assert not engine.proxy._queue
+    engine.stop()
     # print(f"{dir(engine) = }")
     # print(f"{dir(engine.proxy) = }")
     # print(f"{engine.proxy._queue = }")

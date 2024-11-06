@@ -46,7 +46,7 @@ class DriverProxy(object):
         self._busy = True
         self._name = None
         self._iterator = None
-        self._debug = debug
+        self._debug = True  # debug
         self._current_text = ""
 
     def __del__(self):
@@ -66,9 +66,9 @@ class DriverProxy(object):
         @param name: Name associated with the command
         @type name: str
         """
-        print(f"Pushing {self._queue = }")
+        print(f"Pushing {[item[1] for item in self._queue] = }")
         self._queue.append((mtd, args, name))
-        print(f"Pushed {self._queue = }")
+        print(f"Pushed {[item[1] for item in self._queue] = }")
         self._pump()
 
     def _pump(self):
@@ -76,13 +76,17 @@ class DriverProxy(object):
         Attempts to process the next command in the queue if one exists and the
         driver is not currently busy.
         """
-        print(f"Pumping {self._queue = }")
+        print(f"Pumping {[item[1] for item in self._queue] = }")
         while self._queue and not self._busy:
             mtd, args, name = self._queue.pop(0)
             self._name = name
-            print(f"Processing {mtd.__name__}({args}) for {name}")
+            # print(f"Processing {mtd.__name__}({args}) for {name}")
+            print(f"Processing {args = }")
             try:
                 mtd(*args)
+                from time import sleep
+
+                sleep(1)
             except Exception as e:
                 print(f"_pump() error: {e}")
                 self.notify("error", exception=e)
@@ -98,6 +102,7 @@ class DriverProxy(object):
         @param kwargs: Arbitrary keyword arguments
         @type kwargs: dict
         """
+        print(f"notify({topic = }, {kwargs = })")
         if "name" not in kwargs or kwargs["name"] is None:  # Avoid overwriting
             kwargs["name"] = self._name
         self._engine._notify(topic, **kwargs)
@@ -109,6 +114,7 @@ class DriverProxy(object):
         @param busy: True when busy, false when idle
         @type busy: bool
         """
+        print(f"setBusy({busy = })")
         self._busy = busy
         if not self._busy:
             self._pump()
@@ -118,6 +124,7 @@ class DriverProxy(object):
         @return: True if the driver is busy, false if not
         @rtype: bool
         """
+        print(f"isBusy() -> {self._busy = }")
         return self._busy
 
     def say(self, text, name):
@@ -129,7 +136,7 @@ class DriverProxy(object):
         @param name: Name to associate with the utterance
         @type name: str
         """
-        self._current_text = text
+        # self._current_text = text
         self._push(self._driver.say, (text,), name)
 
     def stop(self):
@@ -138,14 +145,16 @@ class DriverProxy(object):
         of commands.
         """
         # clear queue up to first end loop command
+        print(f"stop({self._queue = })")
         while True:
             try:
                 mtd, args, name = self._queue[0]
             except IndexError:
+                print(f"IndexError -- stop({self._queue = })")
                 break
             if mtd == self._engine.endLoop:
                 break
-            self._queue.pop(0)
+            print(f"{self._queue.pop(0) = }")
         self._driver.stop()
 
     def save_to_file(self, text, filename, name):
@@ -186,13 +195,18 @@ class DriverProxy(object):
         Called by the engine to start an event loop, process all commands in
         the queue at the start of the loop, and then exit the loop.
         """
+        print(
+            f"0 runAndWait({self._current_text = }) - {[item[1] for item in self._queue] = }"
+        )
         self._push(self._engine.endLoop, tuple())
         self._driver.startLoop()
+        print(f"1 runAndWait({self._current_text = }) - {self._queue = }")
 
     def startLoop(self, useDriverLoop):
         """
         Called by the engine to start an event loop.
         """
+        print(f"startLoop({useDriverLoop = })")
         if useDriverLoop:
             self._driver.startLoop()
         else:
@@ -202,6 +216,7 @@ class DriverProxy(object):
         """
         Called by the engine to stop an event loop.
         """
+        print(f"endLoop({useDriverLoop = }) - {self._queue = }")
         self._queue = []
         self._driver.stop()
         if useDriverLoop:
@@ -216,6 +231,7 @@ class DriverProxy(object):
         within an external event loop.
         """
         try:
-            next(self._iterator)
+            x = next(self._iterator)
+            print(f"iterate() yielded {x}")
         except StopIteration:
             pass
