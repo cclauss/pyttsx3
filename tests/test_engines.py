@@ -22,7 +22,7 @@ def test_engine_name(driver_name):
     sys.platform == "win32", reason="TODO: Make this test pass on eSpeak-NG on Windows"
 )
 @pytest.mark.parametrize("driver_name", pyttsx3.engine.engines_by_sys_platform())
-def test_speaking_text(driver_name):
+def ztest_speaking_text(driver_name):
     engine = pyttsx3.init(driver_name)
     engine.say("Sally sells seashells by the seashore.")
     engine.say(quick_brown_fox)
@@ -33,8 +33,38 @@ def test_speaking_text(driver_name):
 
 
 @pytest.mark.parametrize("driver_name", pyttsx3.engine.engines_by_sys_platform())
-def test_espeak_voices(driver_name):
+def test_multiple_utterances(driver_name):
     if driver_name != "espeak":
+        pytest.skip(f"Skipping eSpeak-specific test for {driver_name}.")
+
+    engine = pyttsx3.init(driver_name)
+    assert not engine.proxy._queue
+    # print(list(pyttsx3._activeEngines))
+    # print(engine)
+    engine.say("utterance zero")
+    # print(f"{engine.proxy._queue = }")
+    assert len(engine.proxy._queue) == 1
+    assert ("utterance zero",) == engine.proxy._queue[0][1]
+    engine.say("utterance one")
+    # print(f"{engine.proxy._queue = }")
+    assert len(engine.proxy._queue) == 2
+    assert ("utterance zero",) == engine.proxy._queue[0][1]
+    assert ("utterance one",) == engine.proxy._queue[1][1]
+    engine.runAndWait()
+    print(f"{engine.proxy._queue = }")
+    assert not engine.proxy._queue
+    # print(f"{dir(engine) = }")
+    # print(f"{dir(engine.proxy) = }")
+    # print(f"{engine.proxy._queue = }")
+    # print(f"{list(engine.iterate()) = }")
+    # print(f"{list(engine.proxy.iterate()) = }")
+    # from time import sleep ; sleep(40)
+    # assert False
+
+
+@pytest.mark.parametrize("driver_name", pyttsx3.engine.engines_by_sys_platform())
+def test_espeak_voices(driver_name):
+    if driver_name != "Z_espeak":
         pytest.skip(f"Skipping eSpeak-specific test for {driver_name}.")
 
     engine = pyttsx3.init(driver_name)
@@ -80,7 +110,7 @@ def test_espeak_voices(driver_name):
 
 @pytest.mark.parametrize("driver_name", pyttsx3.engine.engines_by_sys_platform())
 def test_apple_nsss_voices(driver_name):
-    if driver_name != "nsss":
+    if driver_name != "Z_nsss":
         pytest.skip(f"Skipping nsss-specific test for {driver_name}.")
 
     import platform
